@@ -430,10 +430,17 @@ def r_poem(prs, frame, source, poem, index=None, module_title=""):
     return s
 
 
-def _paginate_material(text, max_chars=210):
-    """信息/现代文类长阅读材料按"块"分页，统一字号 22pt 下单页容量约 210 字。
-    关键：问答体把"答…"段绑定到前面的"问…"段成一个**不可拆的块**，使同一个问答对
-    尽量落在同一页（否则问在上页末、答在下页首，阅读割裂）；块不跨页，单块超容量才按句切。"""
+def _paginate_material(text):
+    """信息/现代文类长阅读材料按"块"分页（对齐标杆：每页材料框用满、~10 行/约270-300字）。
+    两条关键规则：
+      ① 问答体把"答…"段绑定到前面的"问…"段成不可拆的块，使同一问答对落在同一页；
+      ② 按**渲染行数**（非字数）累积分页——问答体段落多/短行多，按字数会低估行数致溢出。"""
+    # 按"渲染行数"分页（问答体段落多/短行多，按字数会低估行数→溢出，必须按行数）
+    cpl, max_lines = 27, 10        # 每行约27字(22pt,9.16in)；框高约4.95in≈10余行，留余量
+
+    def nlines(t):
+        return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
+
     segs = str(text).split("\n")
     blocks = []
     for s in segs:
@@ -441,19 +448,22 @@ def _paginate_material(text, max_chars=210):
             blocks[-1] += "\n" + s
         else:
             blocks.append(s)
-    pages, cur = [], ""
+    pages, cur, cl = [], "", 0
     for b in blocks:
-        if len(b) > max_chars:                     # 单块(超长答/长论述段)超容量→先结页再块内按句切
+        bl = nlines(b)
+        if bl > max_lines:                         # 单块(超长答/长论述段)超页→先结页再块内按句切
             if cur:
-                pages.append(cur); cur = ""
-            while len(b) > max_chars:
-                cut = (b.rfind("。", 0, max_chars) + 1) or max_chars
+                pages.append(cur); cur, cl = "", 0
+            while nlines(b) > max_lines:
+                approx = max_lines * cpl
+                cut = (b.rfind("。", 0, approx) + 1) or approx
                 pages.append(b[:cut]); b = b[cut:]
-            cur = b
-        elif cur and len(cur) + len(b) + 1 > max_chars:
-            pages.append(cur); cur = b
+            cur, cl = b, nlines(b)
+        elif cur and cl + bl > max_lines:
+            pages.append(cur); cur, cl = b, bl
         else:
             cur = (cur + "\n" + b) if cur else b
+            cl += bl
     if cur:
         pages.append(cur)
     return pages or [""]
@@ -471,9 +481,9 @@ def r_material(prs, frame, source, material, index=None, module_title="", page=N
     if page and page[1] > 1:
         add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 1.5, 1.9, 0.4,
                     size=14, color=INK, ea=YH, align=PP_ALIGN.RIGHT)
-    top = 2.1                       # 内容区统一起点（不随有无出处变化→各页字号容量一致）
-    add_textbox(s, material, 0.42, top, 9.16, 7.0 - top, size=size,
-                color=INK, ea=KAI, line_spacing=1.4)         # 阅读材料=楷体·统一字号
+    top = 2.0                       # 内容区统一起点（不随有无出处变化→各页字号容量一致）
+    add_textbox(s, material, 0.42, top, 9.16, 6.95 - top, size=size,
+                color=INK, ea=KAI, line_spacing=1.4)         # 阅读材料=楷体·统一字号·用满高度
     return s
 
 
