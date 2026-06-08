@@ -430,8 +430,9 @@ def r_poem(prs, frame, source, poem, index=None, module_title=""):
     return s
 
 
-def _paginate_material(text, max_chars=360):
-    """信息/现代文类长阅读材料按段落分页（不切断段落；超长段按句号切）。"""
+def _paginate_material(text, max_chars=210):
+    """信息/现代文类长阅读材料按段落分页（不切断段落；超长段按句号切）。
+    max_chars=210 对应统一字号 22pt 下单页容量（问答体短行多，取保守值确保不溢出）。"""
     pages, cur = [], ""
     for p in str(text).split("\n"):
         while len(p) > max_chars:
@@ -448,24 +449,21 @@ def _paginate_material(text, max_chars=360):
     return pages or [""]
 
 
-def r_material(prs, frame, source, material, index=None, module_title="", page=None):
-    """信息/现代文阅读材料页：左对齐宋体、按字数缩号防出框；长材料分多页，
-    首页带出处标签，多页右上标"材料 n/m"。"""
+def r_material(prs, frame, source, material, index=None, module_title="", page=None, size=22):
+    """信息/现代文阅读材料页：**楷体、统一字号 22pt**（不随页缩放，对齐标杆）、左对齐。
+    长材料已按统一字号容量分页(_paginate_material)，故每页同字号、不溢出；
+    首页带出处标签，多页在出处行右侧标"材料 n/m"。内容区起点固定→各页容量一致。"""
     s = _frame_slide(prs, frame, index, module_title)
-    top = 1.45
     if source:
         ssize = min(22, int(9.0 * 72 / (max(len(source), 1) * 1.06)))
         add_textbox(s, source, 0.4, 1.45, 9.1, 0.55, size=ssize, bold=True,
                     color=RED, ea=YH, anchor=MSO_ANCHOR.MIDDLE)
-        top = 2.05
     if page and page[1] > 1:
-        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.9, top, 1.7, 0.35,
+        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 1.5, 1.9, 0.4,
                     size=14, color=INK, ea=YH, align=PP_ALIGN.RIGHT)
-        top += 0.3
-    h = 6.95 - top
-    msize = _fit_size(material, 9.16, h, sizes=(22, 20, 18, 16), ls=1.45)
-    add_textbox(s, material, 0.42, top, 9.16, h, size=msize, color=INK,
-                ea=SONG, line_spacing=1.45)        # 阅读材料=宋体左对齐
+    top = 2.1                       # 内容区统一起点（不随有无出处变化→各页字号容量一致）
+    add_textbox(s, material, 0.42, top, 9.16, 7.0 - top, size=size,
+                color=INK, ea=KAI, line_spacing=1.4)         # 阅读材料=楷体·统一字号
     return s
 
 
