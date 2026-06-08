@@ -431,19 +431,29 @@ def r_poem(prs, frame, source, poem, index=None, module_title=""):
 
 
 def _paginate_material(text, max_chars=210):
-    """信息/现代文类长阅读材料按段落分页（不切断段落；超长段按句号切）。
-    max_chars=210 对应统一字号 22pt 下单页容量（问答体短行多，取保守值确保不溢出）。"""
+    """信息/现代文类长阅读材料按"块"分页，统一字号 22pt 下单页容量约 210 字。
+    关键：问答体把"答…"段绑定到前面的"问…"段成一个**不可拆的块**，使同一个问答对
+    尽量落在同一页（否则问在上页末、答在下页首，阅读割裂）；块不跨页，单块超容量才按句切。"""
+    segs = str(text).split("\n")
+    blocks = []
+    for s in segs:
+        if blocks and s.lstrip()[:1] == "答":     # “答…”并入前面的“问…”，问答成对
+            blocks[-1] += "\n" + s
+        else:
+            blocks.append(s)
     pages, cur = [], ""
-    for p in str(text).split("\n"):
-        while len(p) > max_chars:
-            cut = (p.rfind("。", 0, max_chars) + 1) or max_chars
+    for b in blocks:
+        if len(b) > max_chars:                     # 单块(超长答/长论述段)超容量→先结页再块内按句切
             if cur:
                 pages.append(cur); cur = ""
-            pages.append(p[:cut]); p = p[cut:]
-        if cur and len(cur) + len(p) + 1 > max_chars:
-            pages.append(cur); cur = p
+            while len(b) > max_chars:
+                cut = (b.rfind("。", 0, max_chars) + 1) or max_chars
+                pages.append(b[:cut]); b = b[cut:]
+            cur = b
+        elif cur and len(cur) + len(b) + 1 > max_chars:
+            pages.append(cur); cur = b
         else:
-            cur = (cur + "\n" + p) if cur else p
+            cur = (cur + "\n" + b) if cur else b
     if cur:
         pages.append(cur)
     return pages or [""]
