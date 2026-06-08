@@ -1,0 +1,17 @@
+{
+  "skill_name": "yuwen-handout-to-courseware",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把桌面上的第2讲【古诗】讲义（高中讲义&课件-语文/讲义/第2讲【古诗】细品炼字之妙，探掘诗歌深意.docx）用高一语文模板转成课件PPT，输出到 output/handout-to-courseware/古诗-eval/",
+      "expected_output": "70页 pptx：5模块结构完整；每小问题目页+答案页；选择题括号字母红+正确选项整行红；古诗楷体居中注释仿宋上标、题干黑体、答案宋体全红；check_overflow 双0",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "用第9讲【小说】的讲义（~/Desktop/高中讲义&课件-语文/讲义/第9讲【小说】感受小说风格，学习艺术手法.docx）出一套课件，按语文模板",
+      "expected_output": "迁移到新讲次：content.json 按第9讲填写（小说文本代替诗歌），结构语法相同，自检通过；验证 skill 对非古诗讲次的通用性",
+      "files": []
+    }
+  ]
+}
