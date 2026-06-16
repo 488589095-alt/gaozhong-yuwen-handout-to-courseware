@@ -442,12 +442,11 @@ def _paginate_material(text):
         段落可跨页——避免"小段独占一页、上方大片空白"；
       · 问答类（≥2 个"问…"段）：把"答…"绑到"问…"成不可拆块，按行数累积，**问答对不跨页**。
     PER/行数取保守值（楷体实际每行约 24 字，宽于估算），确保 WPS 下也不出框。"""
-    cpl = 24
+    cpl, max_lines = 24, 10        # 每行≤24字(楷体22pt保守)，每页10行≈4.28in≤材料框4.6in
     segs = str(text).split("\n")
     is_qa = sum(1 for s in segs if s.lstrip()[:1] == "问") >= 2
 
     if is_qa:
-        max_lines = 11
 
         def nlines(t):
             return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
@@ -475,48 +474,30 @@ def _paginate_material(text):
             pages.append(cur)
         return pages or [""]
 
-    # 论述/说明类：按字数硬切填满，标点处优先断（贴标杆）
-    PER = 11 * cpl                                     # ≈264 字/页
-    pages, buf = [], ""
-    for seg in (x for x in segs if x.strip()):
-        s = seg
-        while len(buf) + len(s) + (1 if buf else 0) > PER:
-            room = PER - len(buf) - (1 if buf else 0)
-            if room <= 2:
-                pages.append(buf); buf = ""; continue
-            cut = room
-            for i in range(room, max(room - 18, 1), -1):   # 回退找标点断点
-                if s[i - 1] in "。！？；，、）”":
-                    cut = i; break
-            buf = (buf + "\n" + s[:cut]) if buf else s[:cut]
-            pages.append(buf); buf = ""; s = s[cut:]
-        buf = (buf + "\n" + s) if buf else s
-    if buf:
-        pages.append(buf)
-    return pages or [""]
+    # 论述/说明类：按"视觉行"流式填满——逐行(每行≤cpl字、段落处换行)，每 max_lines 行一页。
+    # 每页正好 max_lines 行、填满且绝不溢出（按字数切会因短段占整行而低估行数→溢出，已踩坑）。
+    rows = []
+    for seg in segs:
+        if not seg.strip():
+            continue
+        for i in range(0, len(seg), cpl):
+            rows.append(seg[i:i + cpl])
+    return ["\n".join(rows[i:i + max_lines]) for i in range(0, len(rows), max_lines)] or [""]
 
 
 def r_material(prs, frame, source, material, index=None, module_title="", page=None, size=22):
-    """阅读材料页（贴标杆）：材料框 top≈1.2 用满到页底、楷体统一 22pt 左对齐；
-    出处并入材料框**首行**（首页，红·微软雅黑），多页右上标"材料 n/m"；
-    材料页只保留序号、**不画模块徽标**（标杆信息类材料页如此）——以消除上方空白。"""
+    """阅读材料页（贴标杆）：出处单独标签放序号下方（不占材料框→各页材料容量一致，
+    避免首页因出处行多一行而溢出）；材料框 top=1.45 用满到 6.05（楷体统一 22pt 左对齐，
+    底部留红框边距不出框）；材料页只保留序号、不画模块徽标。"""
     s = _frame_slide(prs, frame, index, "")
+    if source:        # 出处单独标签（序号下方），不并入材料框
+        add_textbox(s, source, 0.4, 0.95, 8.9, 0.45, size=20, bold=True,
+                    color=RED, ea=YH, anchor=MSO_ANCHOR.MIDDLE)
     if page and page[1] > 1:
-        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 0.45, 1.9, 0.4,
+        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 0.5, 1.9, 0.4,
                     size=14, color=INK, ea=YH, align=PP_ALIGN.RIGHT)
-    top = 1.2
-    tb = s.shapes.add_textbox(Inches(0.4), Inches(top), Inches(9.16), Inches(6.92 - top))
-    tf = tb.text_frame
-    tf.word_wrap = True
-    lines = ([source] if source else []) + str(material).split("\n")
-    for i, ln in enumerate(lines):
-        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.line_spacing = 1.4
-        run = p.add_run(); run.text = ln
-        if source and i == 0:
-            _style_run(run, 22, True, RED, YH)          # 出处行：红·粗·微软雅黑
-        else:
-            _style_run(run, size, False, INK, KAI)      # 材料：楷体
+    add_textbox(s, material, 0.4, 1.45, 9.16, 4.6, size=size, color=INK,
+                ea=KAI, line_spacing=1.4)
     return s
 
 
@@ -629,6 +610,10 @@ def _emit_passage(add, frame, block, index, mt, ai=False):
             add("material", f"材料{pi+1}/{n}", frame=frame, index=index,
                 module_title=mt, material=frag, page=(pi + 1, n),
                 source=(block["source"] if pi == 0 else None), ai=ai)
+        if block.get("image"):     # 材料配图独立成页（图题 + 居中图），贴标杆把示意图放材料末
+            add("material_image", "材料配图", frame=frame, index=index,
+                module_title=mt, image=block["image"],
+                caption=block.get("image_caption", ""), ai=ai)
 
 
 def _emit_qa(add, frame, q, index, tag=None, mt="", ai=False):
@@ -696,6 +681,22 @@ def render(content_path, template_path, out_path, structure_only=False):
         elif role == "material":
             s = r_material(prs, sp["frame"], sp.get("source"), sp["material"],
                            sp.get("index"), sp.get("module_title", ""), sp.get("page"))
+        elif role == "material_image":
+            s = _frame_slide(prs, sp["frame"], sp.get("index"), "")
+            if sp.get("caption"):
+                add_textbox(s, sp["caption"], 0.4, 1.25, 9.16, 0.5, size=20,
+                            bold=True, color=INK, ea=KAI, align=PP_ALIGN.CENTER)
+            try:
+                from PIL import Image as _PILImage
+                iw, ih = _PILImage.open(sp["image"]).size
+                w = 6.0
+                h = w * ih / iw
+                if h > 4.6:
+                    h = 4.6; w = h * iw / ih
+            except Exception:
+                w, h = 6.0, 3.6
+            s.shapes.add_picture(sp["image"], Inches((10 - w) / 2),
+                                 Inches(2.1), width=Inches(w), height=Inches(h))
         elif role in ("question", "answer"):
             s = r_question(prs, sp["frame"], sp["qtext"], index=sp.get("index"),
                            tag=sp.get("tag"), with_answer=sp["with_answer"],
