@@ -213,6 +213,12 @@ def add_module_badge(slide, text, left, top):
     return bg
 
 
+def _ai_flag(slide):
+    """AI 生成内容页顶部红标，提示老师审阅（讲义没有、由 AI 补的模块都打此标）。"""
+    add_textbox(slide, "【AI生成 · 待检阅】", 2.9, 0.06, 4.2, 0.32, size=14,
+                bold=True, color=RED, ea=YH, align=PP_ALIGN.CENTER)
+
+
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"
 
 
@@ -431,59 +437,86 @@ def r_poem(prs, frame, source, poem, index=None, module_title=""):
 
 
 def _paginate_material(text):
-    """信息/现代文类长阅读材料按"块"分页（对齐标杆：每页材料框用满、~10 行/约270-300字）。
-    两条关键规则：
-      ① 问答体把"答…"段绑定到前面的"问…"段成不可拆的块，使同一问答对落在同一页；
-      ② 按**渲染行数**（非字数）累积分页——问答体段落多/短行多，按字数会低估行数致溢出。"""
-    # 按"渲染行数"分页（问答体段落多/短行多，按字数会低估行数→溢出，必须按行数）
-    cpl, max_lines = 27, 10        # 每行约27字(22pt,9.16in)；框高约4.95in≈10余行，留余量
-
-    def nlines(t):
-        return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
-
+    """长阅读材料分页（统一字号 22pt）。两种文体不同策略，都对齐标杆"每页填满"：
+      · 论述/说明类：像标杆一样**按字数硬切填满**（标点处优先断），每页 ~PER 字、用满，
+        段落可跨页——避免"小段独占一页、上方大片空白"；
+      · 问答类（≥2 个"问…"段）：把"答…"绑到"问…"成不可拆块，按行数累积，**问答对不跨页**。
+    PER/行数取保守值（楷体实际每行约 24 字，宽于估算），确保 WPS 下也不出框。"""
+    cpl = 24
     segs = str(text).split("\n")
-    blocks = []
-    for s in segs:
-        if blocks and s.lstrip()[:1] == "答":     # “答…”并入前面的“问…”，问答成对
-            blocks[-1] += "\n" + s
-        else:
-            blocks.append(s)
-    pages, cur, cl = [], "", 0
-    for b in blocks:
-        bl = nlines(b)
-        if bl > max_lines:                         # 单块(超长答/长论述段)超页→先结页再块内按句切
-            if cur:
-                pages.append(cur); cur, cl = "", 0
-            while nlines(b) > max_lines:
-                approx = max_lines * cpl
-                cut = (b.rfind("。", 0, approx) + 1) or approx
-                pages.append(b[:cut]); b = b[cut:]
-            cur, cl = b, nlines(b)
-        elif cur and cl + bl > max_lines:
-            pages.append(cur); cur, cl = b, bl
-        else:
-            cur = (cur + "\n" + b) if cur else b
-            cl += bl
-    if cur:
-        pages.append(cur)
+    is_qa = sum(1 for s in segs if s.lstrip()[:1] == "问") >= 2
+
+    if is_qa:
+        max_lines = 11
+
+        def nlines(t):
+            return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
+        blocks = []
+        for s in segs:
+            if blocks and s.lstrip()[:1] == "答":
+                blocks[-1] += "\n" + s
+            else:
+                blocks.append(s)
+        pages, cur, cl = [], "", 0
+        for b in blocks:
+            bl = nlines(b)
+            if bl > max_lines:                         # 单块超页→结页+块内按句切
+                if cur:
+                    pages.append(cur); cur, cl = "", 0
+                while nlines(b) > max_lines:
+                    cut = (b.rfind("。", 0, max_lines * cpl) + 1) or max_lines * cpl
+                    pages.append(b[:cut]); b = b[cut:]
+                cur, cl = b, nlines(b)
+            elif cur and cl + bl > max_lines:
+                pages.append(cur); cur, cl = b, bl
+            else:
+                cur = (cur + "\n" + b) if cur else b; cl += bl
+        if cur:
+            pages.append(cur)
+        return pages or [""]
+
+    # 论述/说明类：按字数硬切填满，标点处优先断（贴标杆）
+    PER = 11 * cpl                                     # ≈264 字/页
+    pages, buf = [], ""
+    for seg in (x for x in segs if x.strip()):
+        s = seg
+        while len(buf) + len(s) + (1 if buf else 0) > PER:
+            room = PER - len(buf) - (1 if buf else 0)
+            if room <= 2:
+                pages.append(buf); buf = ""; continue
+            cut = room
+            for i in range(room, max(room - 18, 1), -1):   # 回退找标点断点
+                if s[i - 1] in "。！？；，、）”":
+                    cut = i; break
+            buf = (buf + "\n" + s[:cut]) if buf else s[:cut]
+            pages.append(buf); buf = ""; s = s[cut:]
+        buf = (buf + "\n" + s) if buf else s
+    if buf:
+        pages.append(buf)
     return pages or [""]
 
 
 def r_material(prs, frame, source, material, index=None, module_title="", page=None, size=22):
-    """信息/现代文阅读材料页：**楷体、统一字号 22pt**（不随页缩放，对齐标杆）、左对齐。
-    长材料已按统一字号容量分页(_paginate_material)，故每页同字号、不溢出；
-    首页带出处标签，多页在出处行右侧标"材料 n/m"。内容区起点固定→各页容量一致。"""
-    s = _frame_slide(prs, frame, index, module_title)
-    if source:
-        ssize = min(22, int(9.0 * 72 / (max(len(source), 1) * 1.06)))
-        add_textbox(s, source, 0.4, 1.45, 9.1, 0.55, size=ssize, bold=True,
-                    color=RED, ea=YH, anchor=MSO_ANCHOR.MIDDLE)
+    """阅读材料页（贴标杆）：材料框 top≈1.2 用满到页底、楷体统一 22pt 左对齐；
+    出处并入材料框**首行**（首页，红·微软雅黑），多页右上标"材料 n/m"；
+    材料页只保留序号、**不画模块徽标**（标杆信息类材料页如此）——以消除上方空白。"""
+    s = _frame_slide(prs, frame, index, "")
     if page and page[1] > 1:
-        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 1.5, 1.9, 0.4,
+        add_textbox(s, f"材料 {page[0]}/{page[1]}", 7.7, 0.45, 1.9, 0.4,
                     size=14, color=INK, ea=YH, align=PP_ALIGN.RIGHT)
-    top = 2.0                       # 内容区统一起点（不随有无出处变化→各页字号容量一致）
-    add_textbox(s, material, 0.42, top, 9.16, 6.95 - top, size=size,
-                color=INK, ea=KAI, line_spacing=1.4)         # 阅读材料=楷体·统一字号·用满高度
+    top = 1.2
+    tb = s.shapes.add_textbox(Inches(0.4), Inches(top), Inches(9.16), Inches(6.92 - top))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    lines = ([source] if source else []) + str(material).split("\n")
+    for i, ln in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.line_spacing = 1.4
+        run = p.add_run(); run.text = ln
+        if source and i == 0:
+            _style_run(run, 22, True, RED, YH)          # 出处行：红·粗·微软雅黑
+        else:
+            _style_run(run, size, False, INK, KAI)      # 材料：楷体
     return s
 
 
@@ -529,6 +562,15 @@ def build_specs(C):
     def add(role, summary, **payload):
         specs.append({"role": role, "summary": summary, **payload})
 
+    # 入门测 / 课程总表（讲义没有、AI 生成，置于封面前，贴标杆顺序）
+    if C.get("entry_test"):
+        et = C["entry_test"]
+        _emit_passage(add, "practice", et, None, "入门测", ai=True)
+        for q in et["questions"]:
+            _emit_qa(add, "practice", q, None, mt="入门测", ai=True)
+    if C.get("course_table"):
+        add("course_table", "高一春季课程内容(AI)", ai=True)
+
     add("cover", f"封面 {C['lecture_no']} {C['title']}")
     add("toc", "目录 " + "/".join(C["modules"]))
 
@@ -557,28 +599,42 @@ def build_specs(C):
                      tag=(p.get("tag") if qi == 0 else None), mt="针对练习")
 
     add("summary", "内容总结")
+
+    # 模块六 重点巩固（讲义没有、AI 生成）
+    if C.get("consolidation"):
+        cs = C["consolidation"]
+        add("divider", "模块六 重点巩固", no_cn="六", name="重点巩固", ai=True)
+        _emit_passage(add, "practice", cs, None, "重点巩固", ai=True)
+        for q in cs["questions"]:
+            _emit_qa(add, "practice", q, None, mt="重点巩固", ai=True)
+
+    # 出门测（讲义没有、AI 生成）
+    if C.get("exit_test"):
+        _emit_qa(add, "practice", C["exit_test"]["question"], None,
+                 mt="出门测", ai=True)
+
     add("end", "结束页")
     return specs
 
 
-def _emit_passage(add, frame, block, index, mt):
+def _emit_passage(add, frame, block, index, mt, ai=False):
     """阅读对象：古诗(poem，1页) 或 信息/现代文长材料(material，自动分页)。"""
     if block.get("poem"):
         add("poem", "诗歌", frame=frame, index=index, module_title=mt,
-            source=block["source"], poem=block["poem"])
+            source=block["source"], poem=block["poem"], ai=ai)
     elif block.get("material"):
         pages = _paginate_material(block["material"])
         n = len(pages)
         for pi, frag in enumerate(pages):
             add("material", f"材料{pi+1}/{n}", frame=frame, index=index,
                 module_title=mt, material=frag, page=(pi + 1, n),
-                source=(block["source"] if pi == 0 else None))
+                source=(block["source"] if pi == 0 else None), ai=ai)
 
 
-def _emit_qa(add, frame, q, index, tag=None, mt=""):
+def _emit_qa(add, frame, q, index, tag=None, mt="", ai=False):
     is_choice = q.get("type") == "choice"
     common = dict(frame=frame, index=index, qtext=q["text"],
-                  qtype=q.get("type"), module_title=mt)
+                  qtype=q.get("type"), module_title=mt, ai=ai)
     add("question", "题目(空白)", tag=tag, with_answer=False, **common)
     if is_choice:
         add("answer", "答案(选择)", tag=tag, with_answer=True,
@@ -608,37 +664,43 @@ def render(content_path, template_path, out_path, structure_only=False):
 
     for sp in specs:
         role = sp["role"]
+        s = None
         if role == "cover":
-            r_cover(prs, C)
+            s = r_cover(prs, C)
         elif role == "toc":
-            r_toc(prs, C)
+            s = r_toc(prs, C)
         elif role == "divider":
-            r_divider(prs, sp["no_cn"], sp["name"])
+            s = r_divider(prs, sp["no_cn"], sp["name"])
         elif role == "objective_table":
             o = C["objectives"]
-            r_table_page(prs, "学习目标", o["header"], o["rows"],
-                         col_widths=[1.1, 6.3, 1.6], body_ea=KAI, body_size=18)
+            s = r_table_page(prs, "学习目标", o["header"], o["rows"],
+                             col_widths=[1.1, 6.3, 1.6], body_ea=KAI, body_size=18)
         elif role == "exam_table":
             e = C["exam"]
-            r_table_page(prs, "考情分析", e["header"], e["rows"],
-                         col_widths=[0.9, 1.2, 2.5, 3.0, 1.4],
-                         body_ea=KAI, body_size=12, top=1.8, height=4.6)
+            s = r_table_page(prs, "考情分析", e["header"], e["rows"],
+                             col_widths=[0.9, 1.2, 2.5, 3.0, 1.4],
+                             body_ea=KAI, body_size=12, top=1.8, height=4.6)
+        elif role == "course_table":
+            ct = C["course_table"]
+            s = r_table_page(prs, "高一春季课程", ct["header"], ct["rows"],
+                             col_widths=[2.0, 7.0], body_ea=KAI, body_size=18,
+                             top=1.9, height=4.6)
         elif role == "legend":
-            r_legend(prs, C)
+            s = r_legend(prs, C)
         elif role == "body":
             tb = C["textbook_link"]
-            r_body(prs, tb["title"], tb["paragraphs"])
+            s = r_body(prs, tb["title"], tb["paragraphs"])
         elif role == "poem":
-            r_poem(prs, sp["frame"], sp["source"], sp["poem"], sp.get("index"),
-                   module_title=sp.get("module_title", ""))
+            s = r_poem(prs, sp["frame"], sp["source"], sp["poem"], sp.get("index"),
+                       module_title=sp.get("module_title", ""))
         elif role == "material":
-            r_material(prs, sp["frame"], sp.get("source"), sp["material"],
-                       sp.get("index"), sp.get("module_title", ""), sp.get("page"))
+            s = r_material(prs, sp["frame"], sp.get("source"), sp["material"],
+                           sp.get("index"), sp.get("module_title", ""), sp.get("page"))
         elif role in ("question", "answer"):
-            r_question(prs, sp["frame"], sp["qtext"], index=sp.get("index"),
-                       tag=sp.get("tag"), with_answer=sp["with_answer"],
-                       answer=sp.get("answer"), answer_letter=sp.get("answer_letter"),
-                       qtype=sp.get("qtype"), module_title=sp.get("module_title", ""))
+            s = r_question(prs, sp["frame"], sp["qtext"], index=sp.get("index"),
+                           tag=sp.get("tag"), with_answer=sp["with_answer"],
+                           answer=sp.get("answer"), answer_letter=sp.get("answer_letter"),
+                           qtype=sp.get("qtype"), module_title=sp.get("module_title", ""))
         elif role == "summary":
             st = C.get("knowledge", {}).get("steps") or \
                 ["第一步  释字义，破表层", "第二步  描景象，构画面",
@@ -657,6 +719,9 @@ def render(content_path, template_path, out_path, structure_only=False):
             set_shape_text(s, "Text 0", C["end"]["big"], size=55, ea=None,
                            align=PP_ALIGN.CENTER, line_spacing=1.1)
             set_shape_text(s, "Text 3", C["end"]["small"], size=25.8, ea=None)
+
+        if sp.get("ai") and s is not None:        # AI 生成模块统一打"待检阅"红标
+            _ai_flag(s)
 
     for i in range(orig, 0, -1):
         sldIdLst = prs.slides._sldIdLst
