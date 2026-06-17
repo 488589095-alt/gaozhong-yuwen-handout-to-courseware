@@ -397,7 +397,7 @@ def r_body(prs, title, paragraphs):
     add_textbox(s, title, 4.1, 0.95, 5.2, 0.7, size=32, bold=True,
                 color=DARKRED, ea=YH, align=PP_ALIGN.LEFT,
                 anchor=MSO_ANCHOR.MIDDLE)
-    text = "\n".join(paragraphs)
+    text = "\n".join("　　" + str(p).strip() for p in paragraphs if str(p).strip())  # 段首缩进2字
     bsize = _fit_size(text, 8.2, 4.9, sizes=(22, 20, 18, 16, 14), ls=1.5)
     add_textbox(s, text, 0.9, 2.0, 8.2, 4.9, size=bsize,
                 color=INK, ea=KAI, line_spacing=1.5)   # 正文楷体，按实际行距防出框
@@ -437,33 +437,32 @@ def r_poem(prs, frame, source, poem, index=None, module_title=""):
 
 
 def _paginate_material(text):
-    """长阅读材料分页（统一字号 22pt）。两种文体不同策略，都对齐标杆"每页填满"：
-      · 论述/说明类：像标杆一样**按字数硬切填满**（标点处优先断），每页 ~PER 字、用满，
-        段落可跨页——避免"小段独占一页、上方大片空白"；
-      · 问答类（≥2 个"问…"段）：把"答…"绑到"问…"成不可拆块，按行数累积，**问答对不跨页**。
-    PER/行数取保守值（楷体实际每行约 24 字，宽于估算），确保 WPS 下也不出框。"""
-    cpl, max_lines = 24, 10        # 每行≤24字(楷体22pt保守)，每页10行≈4.28in≤材料框4.6in
-    segs = str(text).split("\n")
-    is_qa = sum(1 for s in segs if s.lstrip()[:1] == "问") >= 2
+    """长材料分页：①段首缩进 2 全角空格；②论述/说明类逐段流式填满（段可跨页切、续接不缩进），
+    ③问答类（≥2 个"问"段）把"答"绑到"问"成块、问答对不跨页；统一按渲染行数（每行≤24字、
+    每页≤10行）控制——填满、不溢出、各页容量一致。"""
+    cpl, max_lines, IND = 24, 10, "\u3000\u3000"
+    raw = [s for s in str(text).split("\n") if s.strip()]
+    is_qa = sum(1 for s in raw if s.lstrip()[:1] == "\u95ee") >= 2
+
+    def nlines(t):
+        return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
 
     if is_qa:
-
-        def nlines(t):
-            return sum(max(1, math.ceil(len(x) / cpl)) for x in t.split("\n"))
         blocks = []
-        for s in segs:
-            if blocks and s.lstrip()[:1] == "答":
-                blocks[-1] += "\n" + s
+        for s in raw:
+            d = IND + s
+            if blocks and s[:1] == "\u7b54":
+                blocks[-1] += "\n" + d
             else:
-                blocks.append(s)
+                blocks.append(d)
         pages, cur, cl = [], "", 0
         for b in blocks:
             bl = nlines(b)
-            if bl > max_lines:                         # 单块超页→结页+块内按句切
+            if bl > max_lines:
                 if cur:
                     pages.append(cur); cur, cl = "", 0
                 while nlines(b) > max_lines:
-                    cut = (b.rfind("。", 0, max_lines * cpl) + 1) or max_lines * cpl
+                    cut = (b.rfind("\u3002", 0, max_lines * cpl) + 1) or max_lines * cpl
                     pages.append(b[:cut]); b = b[cut:]
                 cur, cl = b, nlines(b)
             elif cur and cl + bl > max_lines:
@@ -474,15 +473,25 @@ def _paginate_material(text):
             pages.append(cur)
         return pages or [""]
 
-    # 论述/说明类：按"视觉行"流式填满——逐行(每行≤cpl字、段落处换行)，每 max_lines 行一页。
-    # 每页正好 max_lines 行、填满且绝不溢出（按字数切会因短段占整行而低估行数→溢出，已踩坑）。
-    rows = []
-    for seg in segs:
-        if not seg.strip():
-            continue
-        for i in range(0, len(seg), cpl):
-            rows.append(seg[i:i + cpl])
-    return ["\n".join(rows[i:i + max_lines]) for i in range(0, len(rows), max_lines)] or [""]
+    # 论述/说明类：逐段流式填满，段首缩进；段超一页则跨页切（续接片段不缩进）
+    pages, cur, cl = [], [], 0
+    for s in raw:
+        r = IND + s
+        while r:
+            rl = math.ceil(len(r) / cpl)
+            avail = max_lines - cl
+            if rl <= avail:
+                cur.append(r); cl += rl; r = ""
+            elif avail <= 0:
+                pages.append("\n".join(cur)); cur, cl = [], 0
+            else:
+                room = avail * cpl
+                cur.append(r[:room]); pages.append("\n".join(cur))
+                cur, cl = [], 0; r = r[room:]
+    if cur:
+        pages.append("\n".join(cur))
+    return pages or [""]
+
 
 
 def r_material(prs, frame, source, material, index=None, module_title="", page=None, size=22):
